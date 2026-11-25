@@ -89,6 +89,12 @@ curl.exe -fsSLO https://deploy.ai-dod-spse.davidbenes.cz/deploy.ps1
 powershell -ExecutionPolicy Bypass -File deploy.ps1 .\muj-web jiri
 ```
 
+- Instead of `DOD_TOKEN=…` on every run, put it in a `.env` file in the website folder (or the folder you run the
+  script from). The script reads `DOD_TOKEN` and `DOD_SERVER` from it, never executes it, and never uploads it:
+  ```
+  DOD_TOKEN=<token>
+  ```
+  Order: environment variable, then `<folder>/.env`, then `./.env`; if there's still no token, the script asks.
 - The name is normalized (`Jiří Novák` → `jiri-novak`), 3–30 characters, `deploy/www/admin/api/…` are reserved.
 - First deploy saves `.deploy-secret` and `.deploy-name` in the folder; redeploys from that folder just work
   (`deploy.sh ./muj-web` without a name). Another folder can't take over an existing name.
@@ -101,6 +107,8 @@ powershell -ExecutionPolicy Bypass -File deploy.ps1 .\muj-web jiri
 - Admin: `https://deploy.…/admin` lists sites (age, size, visits, QR), deletes one or all.
 
 ## Limits and safety
+- Only someone with the event token (`EVENT_TOKEN`) can publish. Change it in Coolify after the event (or each day) and
+  redeploy to lock everyone out. Each site also has its own secret, so a token holder can't overwrite someone else's site.
 - Zip ≤ 10 MB, ≤ 500 files, ≤ 40 MB unpacked, extension allowlist, no `..`/absolute paths/symlinks, `index.html` or `index.php` at the root
   (a single top-level folder is unwrapped). Dotfiles and OS junk are dropped.
 - Redeploys swap the folder atomically; a failed upload leaves the old version online. `data/` is kept.

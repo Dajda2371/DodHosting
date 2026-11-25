@@ -55,6 +55,8 @@ public static class Pages
         <h2>Windows (PowerShell)</h2>
         <pre>curl.exe -fsSLO https://deploy.{H(o.SiteDomain)}/deploy.ps1
         powershell -ExecutionPolicy Bypass -File deploy.ps1 .\muj-web jmeno</pre>
+        <p>Token akce můžeš dát do souboru <code>.env</code> ve složce s webem: <code>DOD_TOKEN=…</code>
+        (na server se nenahrává).</p>
         <p class="muted">Ve složce musí být <code>index.html</code> nebo <code>index.php</code>. Žádné fotky ani příjmení.</p>
         """);
 

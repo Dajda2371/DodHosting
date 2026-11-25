@@ -1,11 +1,25 @@
 #!/usr/bin/env bash
 # Publishes a folder to https://<name>.ai-dod-spse.davidbenes.cz
 # Usage: bash deploy.sh <folder> <name>
-#   DOD_TOKEN   event token (asked for if not set)
+#   DOD_TOKEN   event token
 #   DOD_SERVER  deployer URL (default https://deploy.ai-dod-spse.davidbenes.cz)
+# Each is taken from the environment, else from .env in the website folder, else from .env in the
+# current folder; a missing token is asked for. .env is never uploaded (dotfiles are skipped).
 set -euo pipefail
 
-SERVER="${DOD_SERVER:-https://deploy.ai-dod-spse.davidbenes.cz}"
+# Reads KEY from a .env file without executing it: KEY=value, export KEY=value, quotes optional.
+env_value() {
+  [[ -f "$2" ]] || return 0
+  sed -n "s/^[[:space:]]*\(export[[:space:]][[:space:]]*\)\{0,1\}$1[[:space:]]*=[[:space:]]*//p" "$2" \
+    | tail -1 | tr -d '\r' | sed -e 's/[[:space:]]*$//' -e 's/^"\(.*\)"$/\1/' -e "s/^'\(.*\)'$/\1/"
+}
+setting() { # environment > <folder>/.env > ./.env
+  local v="${!1:-}"
+  [[ -z "$v" ]] && v="$(env_value "$1" "$DIR/.env")"
+  [[ -z "$v" && "$(cd "$DIR" && pwd)" != "$PWD" ]] && v="$(env_value "$1" ./.env)"
+  printf '%s' "$v"
+}
+
 DIR="${1:-}"
 NAME="${2:-}"
 
@@ -14,11 +28,12 @@ if [[ ! -d "$DIR" ]]; then echo "Složka '$DIR' neexistuje." >&2; exit 1; fi
 if [[ ! -f "$DIR/index.html" && ! -f "$DIR/index.php" ]]; then
   echo "Ve složce '$DIR' chybí index.html (nebo index.php)." >&2; exit 1
 fi
+SERVER="$(setting DOD_SERVER)"; SERVER="${SERVER:-https://deploy.ai-dod-spse.davidbenes.cz}"
 SECRET_FILE="$DIR/.deploy-secret"
 SAVED_NAME_FILE="$DIR/.deploy-name"
 if [[ -z "$NAME" && -f "$SAVED_NAME_FILE" ]]; then NAME="$(cat "$SAVED_NAME_FILE")"; fi
 if [[ -z "$NAME" ]]; then read -rp "Jméno webu (např. jiri): " NAME; fi
-TOKEN="${DOD_TOKEN:-}"
+TOKEN="$(setting DOD_TOKEN)"
 if [[ -z "$TOKEN" ]]; then read -rsp "Token akce: " TOKEN; echo; fi
 
 command -v zip >/dev/null || { echo "Chybí příkaz 'zip'." >&2; exit 1; }

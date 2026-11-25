@@ -1,12 +1,13 @@
 ﻿# Publishes a folder to https://<name>.ai-dod-spse.davidbenes.cz
 # Usage: powershell -ExecutionPolicy Bypass -File deploy.ps1 <folder> <name>
-#   $env:DOD_TOKEN   event token (asked for if not set)
-#   $env:DOD_SERVER  deployer URL (default https://deploy.ai-dod-spse.davidbenes.cz)
+#   DOD_TOKEN   event token
+#   DOD_SERVER  deployer URL (default https://deploy.ai-dod-spse.davidbenes.cz)
+# Each is taken from the environment, else from .env in the website folder, else from .env in the
+# current folder; a missing token is asked for. .env is never uploaded (dotfiles are skipped).
 param([string]$Dir, [string]$Name)
 $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 
-$Server = if ($env:DOD_SERVER) { $env:DOD_SERVER } else { 'https://deploy.ai-dod-spse.davidbenes.cz' }
 function Fail([string]$msg) { Write-Host $msg -ForegroundColor Red; exit 1 }
 
 $Curl = (Get-Command curl.exe -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1).Source
@@ -21,14 +22,34 @@ $Dir = (Resolve-Path $Dir).Path
 if (-not ((Test-Path (Join-Path $Dir 'index.html')) -or (Test-Path (Join-Path $Dir 'index.php')))) {
     Fail "Ve složce '$Dir' chybí index.html (nebo index.php)."
 }
+# Reads KEY from a .env file without executing it: KEY=value, export KEY=value, quotes optional.
+function EnvFileValue([string]$key, [string]$file) {
+    if (-not (Test-Path $file -PathType Leaf)) { return $null }
+    $value = $null
+    foreach ($line in [IO.File]::ReadAllLines($file)) {
+        if ($line -match "^\s*(export\s+)?$key\s*=\s*(.*?)\s*$") {
+            $value = $Matches[2] -replace '^"(.*)"$', '$1' -replace "^'(.*)'$", '$1'
+        }
+    }
+    return $value
+}
+function Setting([string]$key) {  # environment > <folder>/.env > ./.env
+    $v = [Environment]::GetEnvironmentVariable($key)
+    if (-not $v) { $v = EnvFileValue $key (Join-Path $Dir '.env') }
+    if (-not $v -and $Dir -ne (Get-Location).Path) { $v = EnvFileValue $key (Join-Path (Get-Location).Path '.env') }
+    return $v
+}
+$Server = Setting 'DOD_SERVER'
+if (-not $Server) { $Server = 'https://deploy.ai-dod-spse.davidbenes.cz' }
+
 $SecretFile = Join-Path $Dir '.deploy-secret'
 $NameFile = Join-Path $Dir '.deploy-name'
 if (-not $Name -and (Test-Path $NameFile)) { $Name = (Get-Content $NameFile -Raw).Trim() }
 if (-not $Name) { $Name = Read-Host 'Jméno webu (např. jiri)' }
-$Token = $env:DOD_TOKEN
+$Token = Setting 'DOD_TOKEN'
 if (-not $Token) {
     $sec = Read-Host 'Token akce' -AsSecureString
-    $Token = [Runtime.InteropServices.Marshal]::PtrToStringAuto([Runtime.InteropServices.Marshal]::SecureStringToBSTR($sec))
+    $Token = [Runtime.InteropServices.Marshal]::PtrToStringBSTR([Runtime.InteropServices.Marshal]::SecureStringToBSTR($sec))
 }
 
 $Tmp = Join-Path ([IO.Path]::GetTempPath()) ("dod-" + [guid]::NewGuid().ToString('N'))
