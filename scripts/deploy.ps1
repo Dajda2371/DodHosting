@@ -1,0 +1,78 @@
+﻿# Publishes a folder to https://<name>.ai-dod-spse.davidbenes.cz
+# Usage: powershell -ExecutionPolicy Bypass -File deploy.ps1 <folder> <name>
+#   $env:DOD_TOKEN   event token (asked for if not set)
+#   $env:DOD_SERVER  deployer URL (default https://deploy.ai-dod-spse.davidbenes.cz)
+param([string]$Dir, [string]$Name)
+$ErrorActionPreference = 'Stop'
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+
+$Server = if ($env:DOD_SERVER) { $env:DOD_SERVER } else { 'https://deploy.ai-dod-spse.davidbenes.cz' }
+function Fail([string]$msg) { Write-Host $msg -ForegroundColor Red; exit 1 }
+
+$Curl = (Get-Command curl.exe -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1).Source
+if (-not $Curl -and $IsWindows -eq $false) {  # PowerShell 7 on macOS/Linux
+    $Curl = (Get-Command curl -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1).Source
+}
+if (-not $Curl) { Fail 'Chybí curl.exe (je součástí Windows 10 a novějších).' }
+
+if (-not $Dir) { $Dir = Read-Host 'Složka s webem' }
+if (-not (Test-Path $Dir -PathType Container)) { Fail "Složka '$Dir' neexistuje." }
+$Dir = (Resolve-Path $Dir).Path
+if (-not ((Test-Path (Join-Path $Dir 'index.html')) -or (Test-Path (Join-Path $Dir 'index.php')))) {
+    Fail "Ve složce '$Dir' chybí index.html (nebo index.php)."
+}
+$SecretFile = Join-Path $Dir '.deploy-secret'
+$NameFile = Join-Path $Dir '.deploy-name'
+if (-not $Name -and (Test-Path $NameFile)) { $Name = (Get-Content $NameFile -Raw).Trim() }
+if (-not $Name) { $Name = Read-Host 'Jméno webu (např. jiri)' }
+$Token = $env:DOD_TOKEN
+if (-not $Token) {
+    $sec = Read-Host 'Token akce' -AsSecureString
+    $Token = [Runtime.InteropServices.Marshal]::PtrToStringAuto([Runtime.InteropServices.Marshal]::SecureStringToBSTR($sec))
+}
+
+$Tmp = Join-Path ([IO.Path]::GetTempPath()) ("dod-" + [guid]::NewGuid().ToString('N'))
+New-Item -ItemType Directory $Tmp | Out-Null
+try {
+    # Build the zip with forward slashes (Compress-Archive on PS 5.1 writes backslashes).
+    Add-Type -AssemblyName System.IO.Compression, System.IO.Compression.FileSystem
+    $ZipPath = Join-Path $Tmp 'site.zip'
+    $zip = [IO.Compression.ZipFile]::Open($ZipPath, 'Create')
+    try {
+        Get-ChildItem $Dir -Recurse -File -Force | ForEach-Object {
+            $rel = $_.FullName.Substring($Dir.Length).TrimStart('\', '/').Replace('\', '/')
+            if ($rel -split '/' | Where-Object { $_.StartsWith('.') }) { return }
+            [IO.Compression.ZipFileExtensions]::CreateEntryFromFile($zip, $_.FullName, $rel) | Out-Null
+        }
+    } finally { $zip.Dispose() }
+
+    $OutFile = Join-Path $Tmp 'out.json'
+    $curlArgs = @('-sS', '-o', $OutFile, '-w', '%{http_code}',
+        '-H', "X-Event-Token: $Token",
+        '--form-string', "name=$Name",
+        '-F', "zip=@$ZipPath;type=application/zip")
+    if (Test-Path $SecretFile) { $curlArgs += @('-H', "X-Site-Secret: $((Get-Content $SecretFile -Raw).Trim())") }
+    $Status = & $Curl @curlArgs "$Server/deploy"
+    if ($LASTEXITCODE -ne 0) { Fail "Server není dostupný: $Server" }
+
+    $Res = [IO.File]::ReadAllText($OutFile, [Text.Encoding]::UTF8) | ConvertFrom-Json
+    if ($Status -ne '200') { Fail "Chyba ($Status): $($Res.error)" }
+
+    # Bookkeeping files are hidden in Explorer; un-hide before rewriting (hidden files can't be overwritten).
+    function Save([string]$path, [string]$text) {
+        if (Test-Path $path) { try { (Get-Item $path -Force).Attributes = 'Normal' } catch {} }
+        [IO.File]::WriteAllText($path, $text)
+        try { (Get-Item $path -Force).Attributes = 'Hidden' } catch {}
+    }
+    if ($Res.secret) { Save $SecretFile $Res.secret }
+    Save $NameFile $Res.name
+
+    Write-Host ''
+    Write-Host $Res.qrAscii
+    Write-Host ''
+    Write-Host "  Hotovo! Web běží na:  $($Res.url)" -ForegroundColor Green
+    Write-Host "  QR na celou obrazovku: $($Res.qrUrl)"
+    Write-Host ''
+} finally {
+    Remove-Item $Tmp -Recurse -Force -ErrorAction SilentlyContinue
+}

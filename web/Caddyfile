@@ -1,0 +1,34 @@
+{
+	admin off
+	auto_https off
+}
+
+:80 {
+	# The subdomain (first host label) picks the folder: jiri.ai-dod-spse.davidbenes.cz -> /sites/jiri
+	@site header_regexp sub Host ^([a-z0-9][a-z0-9-]{1,29})\.
+	header X-Robots-Tag "noindex, nofollow"
+	header -Server
+
+	handle @site {
+		root * /sites/{re.sub.1}
+
+		# Never serve the writable data folder or dotfiles (.deploy-secret etc.)
+		@hidden path /data /data/* /.*  */.*
+		respond @hidden 404
+
+		@missing not file {path} {path}/ {path}/index.html {path}/index.php
+		handle @missing {
+			respond "Tahle stránka neexistuje." 404
+		}
+
+		php_fastcgi php:9000 {
+			env PHP_VALUE "open_basedir=/sites/{re.sub.1}/:/tmp/"
+			env SITE_DATA_DIR /sites/{re.sub.1}/data
+		}
+		file_server
+	}
+
+	handle {
+		respond "Not found" 404
+	}
+}

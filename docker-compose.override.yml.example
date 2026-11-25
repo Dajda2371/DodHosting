@@ -1,0 +1,9 @@
+# Local testing: cp docker-compose.override.yml.example docker-compose.override.yml
+services:
+  web:
+    ports: ["8080:80"]
+  deployer:
+    ports: ["8081:8080"]
+    environment:
+      SITE_DOMAIN: dod.localhost:8080
+      SITE_SCHEME: http

@@ -1,0 +1,4 @@
+**/bin
+**/obj
+deployer.Tests
+.git

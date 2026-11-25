@@ -1,0 +1,53 @@
+# Coolify resource: one compose stack for all visitor sites.
+# In Coolify assign domains:
+#   web      -> https://*.ai-dod-spse.davidbenes.cz   (port 80)
+#   deployer -> https://deploy.ai-dod-spse.davidbenes.cz (port 8080)
+services:
+  web:
+    image: caddy:2.8-alpine
+    restart: unless-stopped
+    volumes:
+      - ./web/Caddyfile:/etc/caddy/Caddyfile:ro
+      - sites:/sites:ro
+    networks: [default, sandbox]
+    depends_on: [php]
+
+  php:
+    build: ./php
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m,mode=1777
+    volumes:
+      - sites:/sites
+    networks: [sandbox]          # internal only: no outbound internet
+    cpus: 1.0
+    mem_limit: 512m
+    pids_limit: 128
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+
+  deployer:
+    build:
+      context: .
+      dockerfile: deployer/Dockerfile
+    restart: unless-stopped
+    environment:
+      EVENT_TOKEN: ${EVENT_TOKEN:?set EVENT_TOKEN}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?set ADMIN_PASSWORD}
+      SITE_DOMAIN: ${SITE_DOMAIN:-ai-dod-spse.davidbenes.cz}
+      SITE_SCHEME: ${SITE_SCHEME:-https}
+      SITE_TTL_DAYS: ${SITE_TTL_DAYS:-14}
+      SITES_DIR: /sites
+      META_DIR: /meta
+    volumes:
+      - sites:/sites
+      - meta:/meta
+
+volumes:
+  sites:
+  meta:
+
+networks:
+  sandbox:
+    internal: true

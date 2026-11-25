@@ -1,0 +1,4 @@
+<!doctype html><html lang="cs"><head><meta charset="utf-8"><title>Ukázka</title><link rel="stylesheet" href="style.css"></head>
+<body><h1>Ahoj ze dne otevřených dveří!</h1><p>Návštěv: <span id="n">…</span></p>
+<script>fetch(location.protocol + "//deploy." + location.host.split(".").slice(1).join(".").replace(":8080", ":8081") + "/api/counter/" + location.hostname.split(".")[0]).then(r => r.json()).then(d => n.textContent = d.count).catch(() => n.textContent = "?");</script>
+</body></html>
