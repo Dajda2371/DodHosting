@@ -4,10 +4,9 @@
 #   deployer -> https://deploy.ai-dod-spse.davidbenes.cz (port 8080)
 services:
   web:
-    image: caddy:2.8-alpine
+    build: ./web
     restart: unless-stopped
     volumes:
-      - ./web/Caddyfile:/etc/caddy/Caddyfile:ro
       - sites:/sites:ro
     networks: [default, sandbox]
     depends_on: [php]
