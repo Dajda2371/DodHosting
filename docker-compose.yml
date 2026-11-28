@@ -1,7 +1,8 @@
 # Coolify resource: one compose stack for all visitor sites.
-# In Coolify assign domains:
-#   web      -> https://*.ai-dod-spse.davidbenes.cz   (port 80)
-#   deployer -> https://deploy.ai-dod-spse.davidbenes.cz (port 8080)
+# In Coolify set ONE domain: deployer -> https://deploy.ai-dod-spse.davidbenes.cz, port 8080.
+# The visitor sites (*.ai-dod-spse.davidbenes.cz) are routed by the Traefik labels on `web` below,
+# because Coolify's domain field does not accept wildcards. TLS uses the wildcard certificate from
+# the proxy's dynamic config (see coolify/issue-wildcard-cert.sh).
 services:
   web:
     build: ./web
@@ -10,6 +11,25 @@ services:
       - sites:/sites:ro
     networks: [default, sandbox]
     depends_on: [php]
+    labels:
+      - traefik.enable=true
+      # The network Coolify attaches the proxy to is named after the resource UUID. Without this,
+      # Traefik may pick the internal `sandbox` network, which it can't reach. Update it if the
+      # Coolify resource is ever recreated.
+      - traefik.docker.network=1wqyvgpdb6mqamma8biv75hs
+      - traefik.http.middlewares.dod-to-https.redirectscheme.scheme=https
+      # priority=1 so Coolify's own router for deploy.ai-dod-spse… always wins.
+      - 'traefik.http.routers.dod-sites-http.rule=HostRegexp(`^[a-z0-9-]+\.ai-dod-spse\.davidbenes\.cz`)'
+      - traefik.http.routers.dod-sites-http.entrypoints=http
+      - traefik.http.routers.dod-sites-http.priority=1
+      - traefik.http.routers.dod-sites-http.middlewares=dod-to-https
+      - traefik.http.routers.dod-sites-http.service=dod-sites
+      - 'traefik.http.routers.dod-sites.rule=HostRegexp(`^[a-z0-9-]+\.ai-dod-spse\.davidbenes\.cz`)'
+      - traefik.http.routers.dod-sites.entrypoints=https
+      - traefik.http.routers.dod-sites.priority=1
+      - traefik.http.routers.dod-sites.tls=true
+      - traefik.http.routers.dod-sites.service=dod-sites
+      - traefik.http.services.dod-sites.loadbalancer.server.port=80
 
   php:
     build: ./php

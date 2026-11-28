@@ -16,7 +16,7 @@ phone (QR) ──► Traefik (wildcard TLS) ──► web (Caddy) ──► php-
 | `deployer/` | `POST /deploy`, `/qr/<name>`, `/api/counter/<name>`, `/admin`, TTL cleanup |
 | `deployer.Tests/` | Name + zip validation and deploy/redeploy tests (`dotnet test deployer.Tests`) |
 | `scripts/` | `deploy.sh` (macOS/Linux) and `deploy.ps1` (Windows); also served at `https://deploy.…/deploy.sh` |
-| `coolify/wildcard-cert.yaml` | Traefik dynamic config requesting the wildcard certificate |
+| `coolify/issue-wildcard-cert.sh` | Issues the wildcard certificate (manual DNS TXT) as a Traefik dynamic config |
 
 ## Coolify setup
 
@@ -29,28 +29,23 @@ Wildcard A record (and AAAA if the server has IPv6) at the DNS provider of david
 
 `deploy.ai-dod-spse…` is covered by the wildcard.
 
-### 2. Wildcard certificate (DNS challenge)
-Traefik can only get a wildcard certificate via the DNS challenge. Docs:
-[DNS challenge](https://coolify.io/docs/knowledge-base/proxy/traefik/dns-challenge),
-[wildcard certs](https://coolify.io/docs/knowledge-base/proxy/traefik/wildcard-certs).
+### 2. Wildcard certificate (manual, no DNS API)
+A wildcard certificate needs the DNS-01 challenge. davidbenes.cz is on WEDOS and its API isn't used, so the
+certificate is issued by hand on any machine with Docker and handed to Traefik as a file:
 
-1. Create an API token at the DNS provider, limited to the davidbenes.cz zone (DNS edit).
-2. Servers > server > Proxy > Configuration: in the Traefik command, replace the HTTP challenge lines
-   for the `letsencrypt` resolver with the DNS challenge, and add the token as an environment variable.
-   Example for Cloudflare (other providers: see the Traefik/lego provider list for the env var names):
-   ```yaml
-   environment:
-     - CF_DNS_API_TOKEN=<token>
-   command:
-     # remove: --certificatesresolvers.letsencrypt.acme.httpchallenge=true
-     # remove: --certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=http
-     - '--certificatesresolvers.letsencrypt.acme.dnschallenge.provider=cloudflare'
-     - '--certificatesresolvers.letsencrypt.acme.dnschallenge.resolvers=1.1.1.1:53,8.8.8.8:53'
-   ```
-   Restart the proxy.
-3. Proxy > Dynamic Configurations: add [coolify/wildcard-cert.yaml](coolify/wildcard-cert.yaml).
-4. Check: `curl -vI https://cert.ai-dod-spse.davidbenes.cz 2>&1 | grep subject` shows `*.ai-dod-spse.davidbenes.cz`
-   (a 404 body is fine).
+1. Run `bash coolify/issue-wildcard-cert.sh`. It prints a TXT value.
+2. WEDOS > DNS for davidbenes.cz: add or update `_acme-challenge.ai-dod-spse`, type `TXT`, TTL 300, with that value,
+   then click **Potvrdit změny**. The script waits until all WEDOS nameservers serve it (usually 5–15 minutes),
+   then writes `~/.dod-cert/dod-wildcard.yaml` (certificate + private key inline; keep it private) and copies it
+   to the clipboard.
+3. Coolify > Servers > server > Proxy > Dynamic Configurations: add (or replace) `dod-wildcard.yaml` with that content.
+   Traefik reloads dynamic configs by itself; no proxy restart.
+4. Check: `curl -vI https://deploy.ai-dod-spse.davidbenes.cz 2>&1 | grep -E "subject|expire"` shows
+   `*.ai-dod-spse.davidbenes.cz`.
+
+**The certificate lasts 90 days and does not renew itself.** The current one expires **2027-02-26**; repeat these
+steps before then (each run gives a new TXT value). Traefik serves this certificate for every matching host, so
+Coolify doesn't request per-site certificates.
 
 **Fallback without a DNS token:** give the `web` service fixed domains `https://stul1.ai-dod-spse.davidbenes.cz`, …, `stul20`
 in Coolify (each gets a normal HTTP-challenge certificate), skip the dynamic config, and have visitors deploy to those names.
@@ -66,13 +61,14 @@ in Coolify (each gets a normal HTTP-challenge certificate), skip the dynamic con
    | `SITE_DOMAIN` | `ai-dod-spse.davidbenes.cz` (default) |
    | `SITE_TTL_DAYS` | Days after last deploy before a site is deleted (default 14) |
 
-3. Domains:
-   - `web` → `https://*.ai-dod-spse.davidbenes.cz` (port 80)
-   - `deployer` → `https://deploy.ai-dod-spse.davidbenes.cz` (port 8080)
+3. Domains: add only one, in Domains > Add domain: service `deployer`, `deploy.ai-dod-spse.davidbenes.cz`,
+   port `8080` (confirm "Use This Port Anyway"). Delete the `www.deploy…` domain Coolify adds automatically; it has
+   no DNS record.
 
-   Traefik routes the more specific `deploy.` host to the deployer. If Coolify does not accept the wildcard
-   domain, add a custom label to `web` instead:
-   `traefik.http.routers.dod-web.rule=HostRegexp(\`^[a-z0-9-]+\.ai-dod-spse\.davidbenes\.cz$\`)` with `priority=1`.
+   Leave `web` without a domain: Coolify rejects wildcard domains, so the visitor sites are routed by the Traefik
+   labels on `web` in [docker-compose.yml](docker-compose.yml) (priority 1, so `deploy.` still goes to the deployer).
+   Those labels name the proxy network after the resource UUID (`1wqyvgpdb6mqamma8biv75hs`); if the resource is
+   recreated, update `traefik.docker.network` to the new UUID.
 4. Deploy, then open `https://deploy.ai-dod-spse.davidbenes.cz/`.
 
 ## Using it at the workshop
