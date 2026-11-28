@@ -1,5 +1,6 @@
 ﻿# Publishes a folder to https://<name>.ai-dod-spse.davidbenes.cz
-# Usage: powershell -ExecutionPolicy Bypass -File deploy.ps1 <folder> <name>
+# Usage: powershell -ExecutionPolicy Bypass -File deploy.ps1 [folder] [name]   or   ... deploy.ps1 [name]
+#   folder defaults to the folder this script is in, so you can copy deploy.ps1 into the website and run it.
 #   DOD_TOKEN   event token
 #   DOD_SERVER  deployer URL (default https://deploy.ai-dod-spse.davidbenes.cz)
 # Each is taken from the environment, else from .env in the website folder, else from .env in the
@@ -16,7 +17,9 @@ if (-not $Curl -and $IsWindows -eq $false) {  # PowerShell 7 on macOS/Linux
 }
 if (-not $Curl) { Fail 'Chybí curl.exe (je součástí Windows 10 a novějších).' }
 
-if (-not $Dir) { $Dir = Read-Host 'Složka s webem' }
+# A single argument that isn't a folder is the site name; no folder means the script's own folder.
+if ($Dir -and -not $Name -and -not (Test-Path $Dir -PathType Container)) { $Name = $Dir; $Dir = $null }
+if (-not $Dir) { $Dir = $PSScriptRoot }
 if (-not (Test-Path $Dir -PathType Container)) { Fail "Složka '$Dir' neexistuje." }
 $Dir = (Resolve-Path $Dir).Path
 if (-not ((Test-Path (Join-Path $Dir 'index.html')) -or (Test-Path (Join-Path $Dir 'index.php')))) {
@@ -63,6 +66,7 @@ try {
         Get-ChildItem $Dir -Recurse -File -Force | ForEach-Object {
             $rel = $_.FullName.Substring($Dir.Length).TrimStart('\', '/').Replace('\', '/')
             if ($rel -split '/' | Where-Object { $_.StartsWith('.') }) { return }
+            if ($rel -in @('deploy.ps1', 'deploy.sh')) { return }  # never upload the deploy scripts
             [IO.Compression.ZipFileExtensions]::CreateEntryFromFile($zip, $_.FullName, $rel) | Out-Null
         }
     } finally { $zip.Dispose() }

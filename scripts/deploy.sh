@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Publishes a folder to https://<name>.ai-dod-spse.davidbenes.cz
-# Usage: bash deploy.sh <folder> <name>
+# Usage: bash deploy.sh [folder] [name]   or   bash deploy.sh [name]
+#   folder defaults to the folder this script is in, so you can copy deploy.sh into the website and run it.
 #   DOD_TOKEN   event token
 #   DOD_SERVER  deployer URL (default https://deploy.ai-dod-spse.davidbenes.cz)
 # Each is taken from the environment, else from .env in the website folder, else from .env in the
@@ -20,13 +21,24 @@ setting() { # environment > <folder>/.env > ./.env
   printf '%s' "$v"
 }
 
-DIR="${1:-}"
+# Without a folder argument, publish the folder this script is in (copy deploy.sh into the website).
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_NAME="$(basename "${BASH_SOURCE[0]}")"
+DIR="${1:-$SCRIPT_DIR}"
 NAME="${2:-}"
+# A single argument that isn't a folder is the site name: `bash deploy.sh jiri`.
+if [[ $# -eq 1 && ! -d "$1" ]]; then DIR="$SCRIPT_DIR"; NAME="$1"; fi
 
-if [[ -z "$DIR" ]]; then read -rp "Složka s webem: " DIR; fi
 if [[ ! -d "$DIR" ]]; then echo "Složka '$DIR' neexistuje." >&2; exit 1; fi
-if [[ ! -f "$DIR/index.html" && ! -f "$DIR/index.php" ]]; then
-  echo "Ve složce '$DIR' chybí index.html (nebo index.php)." >&2; exit 1
+DIR="$(cd "$DIR" && pwd)"
+# Exact-case check: the server runs on Linux, so Index.html is not index.html there.
+if ! ls "$DIR" | grep -qxE 'index\.(html|htm|php)'; then
+  echo "Ve složce '$DIR' chybí index.html (nebo index.php)." >&2
+  others="$(cd "$DIR" && ls -1 | grep -iE '\.(html?|php)$' | head -5 | tr '\n' ' ' || true)"
+  [[ -n "$others" ]] && echo "  Nalezené stránky: $others(hlavní stránka se musí jmenovat přesně index.html)" >&2
+  subs="$(cd "$DIR" && for f in */index.html */index.htm */index.php; do [[ -f "$f" ]] && printf '%s ' "${f%/*}"; done; true)"
+  [[ -n "$subs" ]] && echo "  index je v podsložce: $subs- přesuň deploy.sh do ní, nebo spusť: bash $SCRIPT_NAME <složka>" >&2
+  exit 1
 fi
 SERVER="$(setting DOD_SERVER)"; SERVER="${SERVER:-https://deploy.ai-dod-spse.davidbenes.cz}"
 SECRET_FILE="$DIR/.deploy-secret"
@@ -41,7 +53,9 @@ command -v curl >/dev/null || { echo "Chybí příkaz 'curl'." >&2; exit 1; }
 
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
-(cd "$DIR" && zip -qr "$TMP/site.zip" . -x '.*' -x '*/.*' -x '__MACOSX/*')
+# Dotfiles (.env, .deploy-secret) and the deploy scripts themselves are never uploaded.
+(cd "$DIR" && zip -qr "$TMP/site.zip" . -x '.*' -x '*/.*' -x '__MACOSX/*' \
+  -x "$SCRIPT_NAME" -x 'deploy.sh' -x 'deploy.ps1')
 
 SECRET_HEADER=()
 if [[ -f "$SECRET_FILE" ]]; then SECRET_HEADER=(-H "X-Site-Secret: $(cat "$SECRET_FILE")"); fi
